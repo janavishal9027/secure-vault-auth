@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ${APP_NAME}-ingress
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: ${INGRESS_HOST}
+      http:
+        paths:
+          # The Spring app is configured with
+          # server.servlet.context-path=/authentication, so it serves all
+          # endpoints under /authentication/* (e.g. /authentication/login,
+          # /authentication/oauth2/callback/google). Traefik forwards the
+          # path as-is — Spring strips the context-path internally.
+          # This rule wins over the UI's "/" prefix because longer paths
+          # win (most-specific-match), so /authentication/* goes here and
+          # everything else falls through to the UI.
+          - path: /authentication
+            pathType: Prefix
+            backend:
+              service:
+                name: ${APP_NAME}-service
+                port:
+                  number: 80

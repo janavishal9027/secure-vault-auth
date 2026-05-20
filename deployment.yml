@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${APP_NAME}-deployment
+  labels:
+    app: ${APP_NAME}
+spec:
+  replicas: ${REPLICAS}
+  selector:
+    matchLabels:
+      app: ${APP_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${APP_NAME}
+    spec:
+      containers:
+        - name: ${APP_NAME}
+          image: ${IMAGE_REPO}:${IMAGE_TAG}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3211
+          env:
+            # Spring Boot reads these env vars and overrides the values in
+            # application.yml (relaxed binding: SPRING_DATASOURCE_URL maps
+            # to spring.datasource.url, etc.). The yml's hardcoded localhost
+            # url is only relevant for local dev — at runtime in k3s, we
+            # MUST point at the LXD container's bridge IP so the pod can
+            # reach the host-network Postgres.
+            - name: SPRING_DATASOURCE_URL
+              value: ${DB_URL}
+            - name: SPRING_DATASOURCE_USERNAME
+              value: ${DB_USERNAME}
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: ${DB_PASSWORD}
+
+            # JWT signing — must match the value used by every other Java
+            # service (notes, roles) and by ai-core-service's JWT_SECRET
+            # so cross-service tokens validate. Treated as Base64 by jjwt
+            # (Decoders.BASE64.decode), so keep the same encoding everywhere.
+            - name: SECURITY_JWT_SECRET_KEY
+              value: ${JWT_SECRET}
+            - name: SECURITY_JWT_EXPIRATION_TIME
+              value: "${JWT_EXPIRATION}"
+
+            # Roles service URL — Authentication's Feign client uses this
+            # to authorize role lookups for newly-created users. Internal
+            # cluster DNS, not a public host.
+            - name: DIGITAL_APP_ROLES
+              value: ${ROLES_SERVICE_URL}
+            - name: INTERNAL_ROLE_SERVICE_KEY
+              value: ${INTERNAL_ROLE_SERVICE_KEY}
+
+            # Delegate bootstrap — secret key used during first-admin
+            # provisioning. Keep `ALLOW_FIRST_ONLY=false` to allow repeated
+            # bootstrap calls during deploy; flip to `true` once seeded.
+            - name: DELEGATE_BOOTSTRAP_KEY
+              value: ${DELEGATE_BOOTSTRAP_KEY}
+            - name: DELEGATE_BOOTSTRAP_ALLOW_FIRST_ONLY
+              value: "${DELEGATE_BOOTSTRAP_ALLOW_FIRST_ONLY}"
+
+            # OAuth2 — GitHub + Google. Both have public app credentials
+            # registered with the OAuth provider; ingress hostname must
+            # match the redirect URIs configured on each provider.
+            - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID
+              value: ${OAUTH_GITHUB_CLIENT_ID}
+            - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET
+              value: ${OAUTH_GITHUB_CLIENT_SECRET}
+            - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_ID
+              value: ${OAUTH_GOOGLE_CLIENT_ID}
+            - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_SECRET
+              value: ${OAUTH_GOOGLE_CLIENT_SECRET}
+
+            # SMTP for password-reset / 2FA emails. Gmail SMTP with an
+            # app-password; if you rotate the password, redeploy.
+            - name: SPRING_MAIL_HOST
+              value: ${MAIL_HOST}
+            - name: SPRING_MAIL_PORT
+              value: "${MAIL_PORT}"
+            - name: SPRING_MAIL_USERNAME
+              value: ${MAIL_USERNAME}
+            - name: SPRING_MAIL_PASSWORD
+              value: ${MAIL_PASSWORD}
+
+            # Frontend URL used in OAuth redirects + password-reset email
+            # links. Must be the public scheme://host[:port] of the UI.
+            - name: FRONTEND_URL
+              value: ${FRONTEND_URL}
+
+            - name: SWAGGER_ENABLED
+              value: "${SWAGGER_ENABLED}"
+
+            # Cap the JVM heap so requests/limits below are honored. Without
+            # this, the JVM picks a heap based on container memory limit
+            # (good in modern JREs) but explicit is safer.
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+
+          # Spring Boot's actuator /actuator/health is the conventional
+          # readiness probe target, but it requires the actuator dependency.
+          # Until that's added, fall back to a TCP socket check on 3211 —
+          # tells us the JVM is up and listening, which is enough to gate
+          # the rollout.
+          readinessProbe:
+            tcpSocket:
+              port: 3211
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: 3211
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "384Mi"
+            limits:
+              cpu: "750m"
+              memory: "640Mi"

@@ -1,0 +1,76 @@
+spring:
+  application:
+    name: Authentication
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+        starttls:
+          enable: true
+
+  jpa:
+    show-sql: true
+    open-in-view: false
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  security:
+    oauth2:
+      client:
+        registration:
+          github:
+            client-id: ${GITHUB_CLIENT_ID}
+            client-secret: ${GITHUB_CLIENT_SECRET}
+            scope:
+              - read:user
+              - user:mail
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT_SECRET}
+
+server:
+  port: 3211
+  servlet:
+    context-path: /authentication
+
+
+security:
+  jwt:
+    secret-key: ${JWT_SECRET_KEY}
+    expiration-time: ${JWT_EXPIRATION}
+
+internal:
+  role-service-key: ${ROLE_SERVICE_KEY}
+
+delegate:
+  bootstrap:
+    key: ${DELEGATE_BOOTSTRAP_KEY}
+    allow-first-only: false
+
+springdoc:
+  swagger-ui:
+    path: /swagger.html
+
+
+digital:
+  app:
+    roles: ${ROLES_SERVICE_URL}
+
+
+frontend:
+  url: ${FRONTEND_URL}
