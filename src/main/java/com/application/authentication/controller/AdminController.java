@@ -16,7 +16,6 @@ import org.springframework.web.bind.annotation.*;
 public class AdminController {
 
     private final RolesClient rolesClient;
-
 //    private final UserAuthenticationService userAuthService;
 //
 //    private final UserRepository userRepository;
@@ -33,7 +32,6 @@ public class AdminController {
         if (roleType == null || roleType.isBlank() || !roleType.startsWith("ROLE_")) {
             return ResponseEntity.badRequest().body("Invalid roleType. Must start with ROLE_");
         }
-
         rolesClient.createUserRoleMapping("MY_SUPER_SECRET_KEY", roleType, userId);
         return ResponseEntity.ok("Role assigned: " + roleType + " to userId=" + userId);
     }
