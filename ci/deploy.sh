@@ -49,6 +49,8 @@
 #   MAIL_HOST                         Default smtp.gmail.com
 #   MAIL_PORT                         Default 587
 #   SWAGGER_ENABLED                   Default "false" (flip to "true" for dev)
+#   OAUTH2_REDIRECT_BASE_URL          Public https base for OAuth callbacks.
+#                                     Default https://${INGRESS_HOST}/authentication
 
 set -euo pipefail
 
@@ -83,6 +85,11 @@ DELEGATE_BOOTSTRAP_ALLOW_FIRST_ONLY="${DELEGATE_BOOTSTRAP_ALLOW_FIRST_ONLY:-fals
 MAIL_HOST="${MAIL_HOST:-smtp.gmail.com}"
 MAIL_PORT="${MAIL_PORT:-587}"
 SWAGGER_ENABLED="${SWAGGER_ENABLED:-false}"
+# Public https base for OAuth2 redirect URIs = scheme + ingress host + the
+# auth service's /authentication context path. Derived from INGRESS_HOST so it's
+# correct per-environment with no extra config; override only if the auth
+# service is exposed under a different host/path.
+OAUTH2_REDIRECT_BASE_URL="${OAUTH2_REDIRECT_BASE_URL:-https://${INGRESS_HOST}/authentication}"
 
 # Scope the staging dir per service. The input REMOTE_DIR is shared across
 # microservices in the same namespace (e.g. /root/secure-vault-dev-a/manifests),
@@ -136,6 +143,7 @@ render_file() {
     -e "s|\${MAIL_USERNAME}|${MAIL_USERNAME}|g" \
     -e "s|\${MAIL_PASSWORD}|${MAIL_PASSWORD}|g" \
     -e "s|\${FRONTEND_URL}|${FRONTEND_URL}|g" \
+    -e "s|\${OAUTH2_REDIRECT_BASE_URL}|${OAUTH2_REDIRECT_BASE_URL}|g" \
     -e "s|\${SWAGGER_ENABLED}|${SWAGGER_ENABLED}|g" \
     "$in" > "$out"
 }

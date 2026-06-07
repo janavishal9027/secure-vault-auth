@@ -70,6 +70,12 @@ spec:
               value: ${OAUTH_GOOGLE_CLIENT_ID}
             - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_SECRET
               value: ${OAUTH_GOOGLE_CLIENT_SECRET}
+            # Public https base (incl. /authentication context path) used to build
+            # the OAuth2 redirect_uri sent to Google/GitHub. Must be https and must
+            # exactly match the redirect URIs registered with each provider, e.g.
+            #   https://secure-vault-dev.cntrlflix.com/authentication
+            - name: OAUTH2_REDIRECT_BASE_URL
+              value: ${OAUTH2_REDIRECT_BASE_URL}
 
             # SMTP for password-reset / 2FA emails. Gmail SMTP with an
             # app-password; if you rotate the password, redeploy.
