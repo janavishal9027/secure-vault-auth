@@ -70,12 +70,16 @@ spec:
               value: ${OAUTH_GOOGLE_CLIENT_ID}
             - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_SECRET
               value: ${OAUTH_GOOGLE_CLIENT_SECRET}
-            # Public https base (incl. /authentication context path) used to build
-            # the OAuth2 redirect_uri sent to Google/GitHub. Must be https and must
-            # exactly match the redirect URIs registered with each provider, e.g.
-            #   https://secure-vault-dev.cntrlflix.com/authentication
-            - name: OAUTH2_REDIRECT_BASE_URL
-              value: ${OAUTH2_REDIRECT_BASE_URL}
+            # Force the OAuth2 callback (redirect_uri) sent to Google/GitHub to be
+            # the public HTTPS URL. Spring relaxed-binding maps these env vars
+            # straight onto the redirect-uri property, overriding whatever is in
+            # the jar's application.yml — so this works WITHOUT rebuilding the
+            # image, and avoids the internal http:// scheme. The value must match
+            # the Authorized redirect URI registered with each provider EXACTLY.
+            - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_REDIRECT_URI
+              value: https://${INGRESS_HOST}/authentication/login/oauth2/code/google
+            - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_REDIRECT_URI
+              value: https://${INGRESS_HOST}/authentication/login/oauth2/code/github
 
             # SMTP for password-reset / 2FA emails. Gmail SMTP with an
             # app-password; if you rotate the password, redeploy.
