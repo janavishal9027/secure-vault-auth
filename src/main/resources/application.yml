@@ -45,6 +45,9 @@ spring:
 
 server:
   port: 3211
+  # Honor X-Forwarded-* from the ingress (Traefik) so OAuth2 redirect URIs are
+  # built with the public https host, not the internal http pod address.
+  forward-headers-strategy: framework
   servlet:
     context-path: /authentication
 
