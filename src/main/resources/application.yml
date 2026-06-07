@@ -47,7 +47,6 @@ spring:
           google:
             client-id: ${GOOGLE_CLIENT_ID}
             client-secret: ${GOOGLE_CLIENT_SECRET}
-            redirect-uri: "${OAUTH2_REDIRECT_BASE_URL:{baseUrl}}/login/oauth2/code/{registrationId}"
 
 server:
   port: 3211
