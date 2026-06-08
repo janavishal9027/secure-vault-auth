@@ -1,6 +1,7 @@
 package com.application.authentication.configuration;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -27,6 +28,11 @@ public class SecurityConfiguration {
 
     @Autowired
     private CustomAuthProvider authProvider;
+
+    // Allowed browser origin(s) for CORS. Default = local UI; in the cluster set
+    // APP_CORS_ALLOWED_ORIGINS to the public UI origin (login/signup are XHR).
+    @Value("${app.cors.allowed-origins:http://localhost:3000}")
+    private List<String> allowedOrigins;
 
     private static final String[] WHITE_LIST_URL = { "/v2/api-docs", "/v3/api-docs",
             "/v3/api-docs/**", "/swagger-resources", "/swagger-resources/**", "/configuration/ui",
@@ -70,7 +76,7 @@ public class SecurityConfiguration {
     CorsConfigurationSource corsConfigurationSource() {
         org.springframework.web.cors.CorsConfiguration configuration = new CorsConfiguration();
 
-        configuration.setAllowedOrigins(List.of("http://localhost:3000"));
+        configuration.setAllowedOrigins(allowedOrigins);
         configuration.setAllowedMethods(List.of("GET", "POST"));
         configuration.setAllowedHeaders(List.of("Authorization","Content-Type"));
         configuration.setExposedHeaders(List.of("Authorization"));
