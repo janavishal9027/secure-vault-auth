@@ -133,7 +133,7 @@ public class OAuth2LoginSuccessHandler extends SavedRequestAwareAuthenticationSu
 
         // ✅ Redirect
         this.setAlwaysUseDefaultTargetUrl(true);
-        String targetUrl = UriComponentsBuilder.fromUriString(frontendUrl + "/notes/oauth2/redirect")
+        String targetUrl = UriComponentsBuilder.fromUriString(frontendUrl + "/oauth2/redirect")
                 .queryParam("token", jwtToken)
                 .build().toUriString();
 
