@@ -53,9 +53,35 @@ public class Users {
     private LocalDate credentialsExpiryDate;
     private LocalDate accountExpiryDate;
 
+    // The TOTP seed is a credential in its own right — anyone holding it can
+    // generate valid 2FA codes. It must never reach a response body.
+    @JsonIgnore
     private String twoFactorSecret;
+
     private boolean isTwoFactorEnabled = false;
     private String signUpMethod;
+
+    /**
+     * Friendly name shown in the UI. Seeded from the OAuth provider's "name"
+     * claim at first login and editable afterwards; falls back to the username
+     * when never set, so it is safe for this to be null on older rows.
+     */
+    @Size(max = 80)
+    @Column(name = "display_name")
+    private String displayName;
+
+    /**
+     * Either a provider-hosted URL (Google's "picture", GitHub's "avatar_url")
+     * captured at first OAuth login, or a data URI for an avatar the user
+     * uploaded themselves.
+     *
+     * <p>TEXT rather than a bounded varchar because a data URI is the whole
+     * image inline. The upload path downscales before encoding and the write
+     * endpoint enforces a hard size limit — this column is not a place to put
+     * an arbitrary file.</p>
+     */
+    @Column(name = "avatar_url", columnDefinition = "TEXT")
+    private String avatarUrl;
 
     @CreationTimestamp
     @Column(updatable = false)

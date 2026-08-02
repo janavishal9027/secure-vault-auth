@@ -1,7 +1,9 @@
 package com.application.authentication.service;
 
+import com.application.authentication.dtos.UpdateProfileRequest;
 import com.application.authentication.dtos.UserAuthDto;
 import com.application.authentication.dtos.UserDto;
+import com.application.authentication.dtos.UserProfileDto;
 import com.application.authentication.model.Users;
 import com.application.authentication.request.DelegateSignUpRequest;
 import com.application.authentication.request.LoginRequest;
@@ -18,6 +20,12 @@ public interface UserAuthentication {
     UserAuthDto signUpDelegate(DelegateSignUpRequest request, String bootstrapKey);
 
     UserDto loginUser(LoginRequest loginRequest);
+
+    /**
+     * Exchanges a 2FA challenge token plus a valid TOTP code for a real access
+     * token. Throws if the token isn't a challenge token or the code is wrong.
+     */
+    UserDto completeTwoFactorLogin(String challengeToken, int code);
 
     String prepareJwtClaimAndGenerateToken(List<String> roles, LoginRequest loginRequest);
 
@@ -54,4 +62,10 @@ public interface UserAuthentication {
     void disable2FA(String userId);
 
     String extractUserIdFromToken(String token);
+
+    /** The signed-in user's own profile, roles resolved. */
+    UserProfileDto getMyProfile(String username);
+
+    /** Applies the editable subset of a profile and returns the saved result. */
+    UserProfileDto updateMyProfile(String username, UpdateProfileRequest request);
 }

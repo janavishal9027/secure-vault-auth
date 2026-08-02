@@ -81,6 +81,17 @@ public class OAuth2LoginSuccessHandler extends SavedRequestAwareAuthenticationSu
         }
 
         // ✅ find or create user
+        // The provider already knows what this person looks like and what they
+        // are called. Taking both here means an OAuth user arrives at Settings
+        // with a populated profile instead of a blank avatar they have to fill
+        // in by hand.
+        String providerAvatar = firstNonBlank(
+                Objects.toString(attributes.getOrDefault("picture", ""), ""),      // google
+                Objects.toString(attributes.getOrDefault("avatar_url", ""), ""));  // github
+        String providerName = firstNonBlank(
+                Objects.toString(attributes.getOrDefault("name", ""), ""),
+                username);
+
         Users user = userRepository.findByEmail(email).orElseGet(() -> {
             LocalDateTime now = LocalDateTime.now();
             Users newUser = new Users();
@@ -88,6 +99,8 @@ public class OAuth2LoginSuccessHandler extends SavedRequestAwareAuthenticationSu
             newUser.setEmail(email);
             newUser.setUsername(username);
             newUser.setSignUpMethod(provider);
+            newUser.setDisplayName(providerName);
+            newUser.setAvatarUrl(providerAvatar.isBlank() ? null : providerAvatar);
 
             newUser.setAccountExpiryDate(LocalDate.now().plusYears(1));
             newUser.setAccountNonExpired(true);
@@ -107,6 +120,26 @@ public class OAuth2LoginSuccessHandler extends SavedRequestAwareAuthenticationSu
 
             return saved;
         });
+
+        // Backfill only what is missing.
+        //
+        // Accounts that predate avatar support have no picture, and re-reading
+        // it from the provider on login is the cheapest way to give them one.
+        // The emptiness check is the whole point: a user who has uploaded their
+        // own avatar or renamed themselves must not have that overwritten by
+        // the provider's copy every time they sign in.
+        boolean backfilled = false;
+        if (isBlank(user.getAvatarUrl()) && !providerAvatar.isBlank()) {
+            user.setAvatarUrl(providerAvatar);
+            backfilled = true;
+        }
+        if (isBlank(user.getDisplayName()) && !providerName.isBlank()) {
+            user.setDisplayName(providerName);
+            backfilled = true;
+        }
+        if (backfilled) {
+            user = userRepository.save(user);
+        }
 
         // ✅ Always get roles from roles-service (since roles is @Transient)
         List<RoleRespDto> roles = rolesClient.getRolesByUserId(user.getUserId());
@@ -139,6 +172,20 @@ public class OAuth2LoginSuccessHandler extends SavedRequestAwareAuthenticationSu
 
         this.setDefaultTargetUrl(targetUrl);
         super.onAuthenticationSuccess(request, response, authentication);
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    /** First value that is neither null nor whitespace, or "" if there is none. */
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (!isBlank(value)) {
+                return value;
+            }
+        }
+        return "";
     }
 
 }

@@ -21,6 +21,16 @@ import java.util.function.Function;
 @Service
 public class JwtService {
 
+    /**
+     * Claim marking a token as a 2FA challenge: the password was accepted but
+     * the second factor has not been presented yet. Every consumer of a token
+     * must treat one carrying this claim as unauthenticated.
+     */
+    public static final String MFA_PENDING_CLAIM = "mfaPending";
+
+    /** How long a user has to enter their TOTP code before re-authenticating. */
+    private static final long MFA_CHALLENGE_TTL_MILLIS = 5 * 60 * 1000L;
+
     @Value("${security.jwt.secret-key}")
     private String secretKey;
 
@@ -58,7 +68,9 @@ public class JwtService {
 
     public boolean validateToken(String token, LoginRequest loginRequest){
         final String usernameFromToken = getUsernameFromToken(token);
-        return (usernameFromToken.equals(loginRequest.getUsername()) && isTokenNotExpired(token));
+        return (usernameFromToken.equals(loginRequest.getUsername())
+                && isTokenNotExpired(token)
+                && !isMfaPending(token));
     }
 
     private boolean isTokenNotExpired(String token){
@@ -67,7 +79,18 @@ public class JwtService {
 
     public boolean isTokenValid(String token, UserDetails userDetails){
         String usernameFromToken = getUsernameFromToken(token);
-        return (usernameFromToken.equals(userDetails.getUsername()) && isTokenNotExpired(token));
+        return (usernameFromToken.equals(userDetails.getUsername())
+                && isTokenNotExpired(token)
+                && !isMfaPending(token));
+    }
+
+    /**
+     * True when the token is only a 2FA challenge. Such a token proves the
+     * password was correct and nothing more — it must not authenticate a
+     * request anywhere.
+     */
+    public boolean isMfaPending(String token){
+        return Boolean.TRUE.equals(getAllClaimsFromToken(token).get(MFA_PENDING_CLAIM, Boolean.class));
     }
 
     //Token Generation
@@ -87,6 +110,22 @@ public class JwtService {
         return buildToken(claims, loginRequest);
     }
 
+    /**
+     * Short-lived token issued after a correct password when the account has
+     * 2FA enabled. It carries {@link #MFA_PENDING_CLAIM}, so it authenticates
+     * nothing; the holder must exchange it via /verify-2fa-login.
+     */
+    public String generateMfaChallengeToken(String username){
+        return Jwts.builder()
+                .subject(username)
+                .claim("username", username)
+                .claim(MFA_PENDING_CLAIM, true)
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + MFA_CHALLENGE_TTL_MILLIS))
+                .signWith(getSigningKey(), Jwts.SIG.HS256)
+                .compact();
+    }
+
     public String generateTokenFromUsername(UserDetailImpl userDetails) {
         String username = userDetails.getUsername();
         List<String> roles = userDetails.getAuthorities()
@@ -98,6 +137,9 @@ public class JwtService {
         return Jwts.builder()
                 .subject(username)
                 .claim("username", username)
+                // Downstream services scope user-owned rows by userId, not by
+                // the subject (which is the username) — so it has to be here.
+                .claim("userId", userDetails.getUserId())
                 .claim("roles", roles)
                 .claim("is2faEnabled", userDetails.is2faEnabled())
                 .issuedAt(new Date())

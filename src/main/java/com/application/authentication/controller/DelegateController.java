@@ -20,9 +20,7 @@ public class DelegateController {
             @RequestBody DelegateSignUpRequest request,
             @RequestHeader("X-Delegate-Bootstrap-Key") String bootstrapKey
     ) {
-        System.out.println("DelegateController hit");
         UserAuthDto response = userAuthentication.signUpDelegate(request, bootstrapKey);
-        System.out.println("Response from service = " + response);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 

@@ -3,6 +3,8 @@ package com.application.authentication.exceptions;
 import com.application.authentication.utils.ApiResponse;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.security.SignatureException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
@@ -15,9 +17,34 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    /**
+     * Messages safe to hand back to a caller. Anything else — Feign transport
+     * errors carrying internal service URLs, JPA/SQL text, class names — is
+     * logged and replaced with a generic string, since those details map out
+     * the internals for an attacker.
+     */
+    private static final Set<String> SAFE_MESSAGES = Set.of(
+            "Username already exists",
+            "Email already exists",
+            "User not found",
+            "Account is disabled",
+            "Account is locked",
+            "Account is expired",
+            "Credentials expired",
+            "Unauthorized",
+            "Invalid delegate bootstrap key",
+            "Delegate already exists. Private delegate signup is disabled.",
+            "You already have a pending request for admin role",
+            "Request not found",
+            "Already processed"
+    );
 
     public ResponseEntity<ApiResponse> getResponse(String message, int statusCode) {
         return new ResponseEntity<>(ApiResponse.builder().status("FAILED").message(message).build(), HttpStatusCode.valueOf(statusCode));
@@ -25,11 +52,17 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Map<String, Object>> handleRuntimeException(RuntimeException ex) {
+        String message = ex.getMessage();
+        if (message == null || !SAFE_MESSAGES.contains(message)) {
+            log.error("unhandled runtime exception", ex);
+            message = "Request could not be completed";
+        }
+
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("timestamp", LocalDateTime.now());
         body.put("status", HttpStatus.BAD_REQUEST.value());
         body.put("error", "Bad Request");
-        body.put("message", ex.getMessage());
+        body.put("message", message);
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }

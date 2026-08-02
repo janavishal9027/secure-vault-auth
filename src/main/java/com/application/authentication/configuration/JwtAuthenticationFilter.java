@@ -47,6 +47,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         try{
             final String jwt = authorization.substring(7);
+
+            // A 2FA challenge token proves only that the password was correct.
+            // Never let one populate the security context.
+            if (jwtService.isMfaPending(jwt)) {
+                filterChain.doFilter(request, response);
+                return;
+            }
+
             final String username = jwtService.getUsernameFromToken(jwt);
             Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 

@@ -68,7 +68,10 @@ internal:
 delegate:
   bootstrap:
     key: ${DELEGATE_BOOTSTRAP_KEY}
-    allow-first-only: false
+    # Defaults to true: the bootstrap endpoint exists to create the very first
+    # delegate. Left open, anyone holding the bootstrap key can mint unlimited
+    # delegate accounts.
+    allow-first-only: ${DELEGATE_ALLOW_FIRST_ONLY:true}
 
 springdoc:
   swagger-ui:

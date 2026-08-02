@@ -12,6 +12,7 @@ import com.application.authentication.utils.AuthUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -33,6 +34,9 @@ public class RoleUpgradeRequestServiceImpl implements RoleUpgradeService{
 
     @Autowired
     private ModelMapper modelMapper;
+
+    @Value("${internal.role-service-key}")
+    private String internalKey;
 
     // CUSTOMER raises request ---------> To upgrade the role to ADMIN
     @Override
@@ -86,7 +90,7 @@ public class RoleUpgradeRequestServiceImpl implements RoleUpgradeService{
 
         if(!"PENDING".equals(roleUpgradeRequest.getStatus())) throw new RuntimeException("Already processed");
 
-        rolesClient.createUserRoleMapping("MY_SUPER_SECRET_KEY","ADMIN", roleUpgradeRequest.getUserId());
+        rolesClient.createUserRoleMapping(internalKey, "ADMIN", roleUpgradeRequest.getUserId());
 
         roleUpgradeRequest.setStatus("APPROVED");
         roleUpgradeRequest.setReviewedBy(reviewer.getUsername());

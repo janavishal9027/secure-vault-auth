@@ -256,18 +256,73 @@ public class UserAuthenticationService implements UserAuthentication {
                 .map(String::toUpperCase)
                 .toList();
 
-        // Generate JWT
+        // With 2FA on, the password alone must not yield a usable token —
+        // otherwise the second factor is decorative. Hand back a challenge
+        // token that grants nothing until /verify-2fa-login exchanges it.
+        if (user.isTwoFactorEnabled()) {
+            return UserDto.builder()
+                    .username(user.getUsername())
+                    .jwtToken(jwtService.generateMfaChallengeToken(user.getUsername()))
+                    .roles(List.of())
+                    .mfaRequired(true)
+                    .build();
+        }
+
+        return UserDto.builder()
+                .username(user.getUsername())
+                .jwtToken(issueAccessToken(user, roleTypes))
+                .roles(roleTypes)
+                .mfaRequired(false)
+                .build();
+    }
+
+    /** Mints the real, fully-privileged access token for a user. */
+    private String issueAccessToken(Users user, List<String> roleTypes) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("roles", roleTypes);
         claims.put("username", user.getUsername());
         claims.put("userId", user.getUserId());
 
-        String token = jwtService.generateToken(claims, loginRequest);
+        return jwtService.generateToken(
+                claims,
+                LoginRequest.builder().username(user.getUsername()).build()
+        );
+    }
+
+    @Override
+    public UserDto completeTwoFactorLogin(String challengeToken, int code) {
+        // Only a genuine, unexpired challenge token may be exchanged. Anything
+        // else — an already-exchanged access token, a forged one — is refused.
+        if (!jwtService.isMfaPending(challengeToken)) {
+            throw new BadCredentialsException("Not a valid 2FA challenge token");
+        }
+
+        String username = jwtService.getUsernameFromToken(challengeToken);
+        Users user = findByUsername(username);
+
+        if (!user.isTwoFactorEnabled() || !verify2FASecret(user.getUserId(), code)) {
+            throw new BadCredentialsException("Invalid 2FA code");
+        }
+
+        List<RoleRespDto> roles;
+        try {
+            roles = rolesClient.getRolesByUserId(user.getUserId());
+        } catch (FeignException e) {
+            throw new ClientConnectException("Unable to fetch roles from Roles Service");
+        }
+
+        List<String> roleTypes = (roles == null || roles.isEmpty())
+                ? List.of("ROLE_CUSTOMER")
+                : roles.stream()
+                .map(RoleRespDto::getRoleType)
+                .map(String::toUpperCase)
+                .toList();
 
         return UserDto.builder()
                 .username(user.getUsername())
-                .jwtToken(token)
+                .jwtToken(issueAccessToken(user, roleTypes))
                 .roles(roleTypes)
+                .mfaRequired(false)
                 .build();
     }
 
@@ -393,6 +448,109 @@ public class UserAuthenticationService implements UserAuthentication {
         Users users = userRepository.findById(userId).orElseThrow(() -> new RuntimeException("User not found"));
         users.setTwoFactorEnabled(false);
         userRepository.save(users);
+    }
+
+    // -------------------------
+    // SELF-SERVICE PROFILE
+    // -------------------------
+
+    /**
+     * Largest avatar we will store, as characters of the encoded string.
+     *
+     * <p>256 KB of base64 is roughly a 190 KB image — far more than the
+     * 256x256 avatar the UI downscales to, and small enough that a row stays
+     * cheap to read. The limit exists because this column is reachable by any
+     * authenticated user: without it, a profile update is an unbounded write.</p>
+     */
+    private static final int MAX_AVATAR_CHARS = 256 * 1024;
+
+    @Override
+    public UserProfileDto getMyProfile(String username) {
+        Users user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found with username: " + username));
+        return toProfile(user);
+    }
+
+    @Override
+    public UserProfileDto updateMyProfile(String username, UpdateProfileRequest request) {
+        Users user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found with username: " + username));
+
+        // Null means "not submitted"; empty means "clear it". Distinguishing
+        // the two is what lets one endpoint both rename and remove an avatar
+        // without a caller ever having to send fields it did not touch.
+        if (request.getDisplayName() != null) {
+            String name = request.getDisplayName().trim();
+            if (name.length() > 80) {
+                throw new IllegalArgumentException("Display name must be at most 80 characters");
+            }
+            user.setDisplayName(name.isEmpty() ? null : name);
+        }
+
+        if (request.getAvatarUrl() != null) {
+            String avatar = request.getAvatarUrl().trim();
+            if (avatar.isEmpty()) {
+                user.setAvatarUrl(null);
+            } else {
+                validateAvatar(avatar);
+                user.setAvatarUrl(avatar);
+            }
+        }
+
+        return toProfile(userRepository.save(user));
+    }
+
+    /**
+     * Accepts an https URL or an inline image, and nothing else.
+     *
+     * <p>The scheme check is the point. This value is written straight into an
+     * {@code <img src>}, so permitting an arbitrary string would let a user
+     * store {@code javascript:} or a {@code data:text/html} payload and have
+     * it rendered — stored XSS against their own session, and against anyone
+     * an avatar is later shown to.</p>
+     */
+    private void validateAvatar(String avatar) {
+        String lower = avatar.toLowerCase(Locale.ROOT);
+
+        if (lower.startsWith("http://") || lower.startsWith("https://")) {
+            return;
+        }
+
+        if (lower.startsWith("data:image/")) {
+            if (avatar.length() > MAX_AVATAR_CHARS) {
+                throw new IllegalArgumentException(
+                        "Avatar is too large. Please choose a smaller image.");
+            }
+            return;
+        }
+
+        throw new IllegalArgumentException(
+                "Avatar must be an http(s) URL or an inline image");
+    }
+
+    private UserProfileDto toProfile(Users user) {
+        List<RoleRespDto> roles;
+        try {
+            roles = rolesClient.getRolesByUserId(user.getUserId());
+        } catch (Exception ex) {
+            // The roles service is not required to render a profile. Failing
+            // the whole Settings page because a secondary lookup was down
+            // would hide the parts that are perfectly available.
+            log.warn("could not resolve roles for {}: {}", user.getUserId(), ex.getMessage());
+            roles = List.of();
+        }
+
+        return UserProfileDto.builder()
+                .userId(user.getUserId())
+                .username(user.getUsername())
+                .email(user.getEmail())
+                .displayName(user.getDisplayName())
+                .avatarUrl(user.getAvatarUrl())
+                .signUpMethod(user.getSignUpMethod())
+                .twoFactorEnabled(user.isTwoFactorEnabled())
+                .roles(roles == null ? List.of() : roles)
+                .createdDate(user.getCreatedDate())
+                .build();
     }
 
 }

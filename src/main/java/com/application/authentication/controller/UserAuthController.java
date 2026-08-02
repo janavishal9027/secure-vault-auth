@@ -1,5 +1,6 @@
 package com.application.authentication.controller;
 
+import com.application.authentication.dtos.UpdateProfileRequest;
 import com.application.authentication.dtos.UserAuthDto;
 import com.application.authentication.dtos.UserDto;
 import com.application.authentication.model.Users;
@@ -8,6 +9,7 @@ import com.application.authentication.request.LoginRequest;
 import com.application.authentication.request.SignUpRequest;
 import com.application.authentication.service.JwtService;
 import com.application.authentication.service.TotpService;
+import com.application.authentication.service.UserDetailImpl;
 import com.application.authentication.service.UserAuthentication;
 import com.application.authentication.service.UserAuthenticationService;
 import com.application.authentication.utils.ApiResponse;
@@ -21,6 +23,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -51,6 +56,9 @@ public class UserAuthController {
     @Autowired
     private UserAuthentication userAuthentication;
 
+    @Autowired
+    private UserDetailsService userDetailsService;
+
 
     // -------------------------
     // PUBLIC ENDPOINTS
@@ -71,28 +79,40 @@ public class UserAuthController {
     }
 
     /**
-     * Token validation endpoint - useful for gateway or frontend.
-     * Keep public if your gateway needs it.
+     * Token validation endpoint - used server-to-server by the notes service.
+     *
+     * The token travels in the Authorization header, never as a query
+     * parameter: query strings land in access logs, proxy logs and browser
+     * history, which is no place for a live credential.
      */
     @GetMapping("/public/validate")
-    public Boolean validateToken(@RequestParam String token){
-        return userAuthService.validateToken(token);
+    public Boolean validateToken(@RequestHeader("Authorization") String authorization){
+        return userAuthService.validateToken(stripBearer(authorization));
     }
 
     @GetMapping("/public/extractUserId")
-    public String extractUserId(@RequestParam String token) {
-        return userAuthService.extractUserIdFromToken(token);
+    public String extractUserId(@RequestHeader("Authorization") String authorization) {
+        return userAuthService.extractUserIdFromToken(stripBearer(authorization));
     }
 
+    private String stripBearer(String authorization) {
+        if (authorization == null || authorization.isBlank()) {
+            throw new BadCredentialsException("Missing Authorization header");
+        }
+        return authorization.startsWith("Bearer ") ? authorization.substring(7) : authorization;
+    }
+
+    /**
+     * Second leg of a 2FA login: swaps the challenge token issued by /login
+     * for a real access token. Until this succeeds the caller holds nothing
+     * usable.
+     */
     @PostMapping("/public/verify-2fa-login")
-    public ResponseEntity<String> verify2FALogin(@RequestParam int code, @RequestParam String jwtToken){
-        String username = jwtService.getUsernameFromJwtToken(jwtToken);
-        Users user = userAuthService.findByUsername(username);
-        boolean isValid = userAuthService.verify2FASecret(user.getUserId(), code);
-        if(isValid){
-            return ResponseEntity.ok("2FA Verified Successfully");
-        } else {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid 2FA Code");
+    public ResponseEntity<?> verify2FALogin(@RequestParam int code, @RequestParam String jwtToken){
+        try {
+            return ResponseEntity.ok(userAuthService.completeTwoFactorLogin(jwtToken, code));
+        } catch (BadCredentialsException e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "Invalid 2FA Code"));
         }
     }
 
@@ -160,5 +180,79 @@ public class UserAuthController {
     @SecurityRequirement(name = "bearerAuth")
     public UserAuthDto getUserByUserId(@RequestParam String userId) {
         return userAuthService.getUserByUserId(userId);
+    }
+
+    /**
+     * Exchanges a still-valid token for a fresh one.
+     *
+     * <p>This is what turns the JWT lifetime from an <em>absolute</em> cap into
+     * an <em>idle</em> one. Previously a session died 30 minutes after login no
+     * matter what the user was doing, which is why someone mid-note could be
+     * thrown back to the login screen. The client now renews while the user is
+     * active, and simply stops renewing when they are not — so the same 30
+     * minutes becomes "30 minutes of inactivity".</p>
+     *
+     * <p>Deliberately not a public endpoint and deliberately not accepting a
+     * token in the body: the caller must already be authenticated, so an
+     * expired token cannot be traded for a live one. Once the window lapses,
+     * logging in again is the only way back.</p>
+     */
+    @PostMapping("/refresh-token")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<?> refreshToken() {
+        String username = authUtils.loggedInUsername();
+        if (username == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(new ApiResponse(Constants.FAILED.name(), "Not authenticated"));
+        }
+
+        UserDetails details = userDetailsService.loadUserByUsername(username);
+        if (!(details instanceof UserDetailImpl userDetails)) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse(Constants.FAILED.name(), "Unable to refresh session"));
+        }
+
+        String token = jwtService.generateTokenFromUsername(userDetails);
+        return ResponseEntity.ok(Map.of("jwtToken", token));
+    }
+
+    // -------------------------
+    // SELF-SERVICE PROFILE
+    // -------------------------
+
+    /**
+     * The caller's own profile.
+     *
+     * <p>Takes no identifier. The existing lookup endpoints accept a userId or
+     * username from the query string, which makes them a poor fit for "show me
+     * my settings" — the client would have to say who it is, and the server
+     * would have to decide whether to believe it. Here the subject comes from
+     * the authenticated principal, so there is nothing to authorise.</p>
+     */
+    @GetMapping("/me")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<?> getMyProfile() {
+        String username = authUtils.loggedInUsername();
+        if (username == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(new ApiResponse(Constants.FAILED.name(), "Not authenticated"));
+        }
+        return ResponseEntity.ok(userAuthService.getMyProfile(username));
+    }
+
+    @PatchMapping("/me")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<?> updateMyProfile(@Valid @RequestBody UpdateProfileRequest request) {
+        String username = authUtils.loggedInUsername();
+        if (username == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(new ApiResponse(Constants.FAILED.name(), "Not authenticated"));
+        }
+        try {
+            return ResponseEntity.ok(userAuthService.updateMyProfile(username, request));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest()
+                    .body(new ApiResponse(Constants.FAILED.name(), ex.getMessage()));
+        }
     }
 }

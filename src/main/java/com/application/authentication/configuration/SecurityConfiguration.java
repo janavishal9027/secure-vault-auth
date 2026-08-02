@@ -49,8 +49,11 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         // Swagger
                         .requestMatchers(WHITE_LIST_URL).permitAll()
-                        // Public APIs
-                        .requestMatchers("/api/user/**","/api/user/public/**", "/api/delegate/signup-delegate").permitAll()
+                        // Public APIs. Scoped to /api/user/public/** on purpose:
+                        // a blanket /api/user/** also exposed the authenticated
+                        // lookup endpoints (getUserByUsername, getUserByUserId)
+                        // to anonymous callers.
+                        .requestMatchers("/api/user/public/**", "/api/delegate/signup-delegate").permitAll()
                         //Auth buttons
                         .requestMatchers("/authentication/oauth2/**").permitAll()
                         // RBAC
@@ -77,7 +80,7 @@ public class SecurityConfiguration {
         org.springframework.web.cors.CorsConfiguration configuration = new CorsConfiguration();
 
         configuration.setAllowedOrigins(allowedOrigins);
-        configuration.setAllowedMethods(List.of("GET", "POST"));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization","Content-Type"));
         configuration.setExposedHeaders(List.of("Authorization"));
 

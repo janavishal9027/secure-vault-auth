@@ -6,6 +6,7 @@ import com.application.authentication.service.UserAuthentication;
 import com.application.authentication.service.UserAuthenticationService;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -16,6 +17,9 @@ import org.springframework.web.bind.annotation.*;
 public class AdminController {
 
     private final RolesClient rolesClient;
+
+    @Value("${internal.role-service-key}")
+    private String internalKey;
 //    private final UserAuthenticationService userAuthService;
 //
 //    private final UserRepository userRepository;
@@ -32,7 +36,7 @@ public class AdminController {
         if (roleType == null || roleType.isBlank() || !roleType.startsWith("ROLE_")) {
             return ResponseEntity.badRequest().body("Invalid roleType. Must start with ROLE_");
         }
-        rolesClient.createUserRoleMapping("MY_SUPER_SECRET_KEY", roleType, userId);
+        rolesClient.createUserRoleMapping(internalKey, roleType, userId);
         return ResponseEntity.ok("Role assigned: " + roleType + " to userId=" + userId);
     }
 
